@@ -90,7 +90,12 @@ export const AppSidebar = {
     if (result.failed.length > 0) {
       addRow("❌", `${result.failed.length} failed`, "#c53030");
     }
-    if (result.fieldsFilled === 0 && result.learnedFieldsApplied === 0) {
+    const anyAction =
+      result.fieldsFilled > 0 ||
+      result.learnedFieldsApplied > 0 ||
+      result.unrecognized.length > 0 ||
+      result.failed.length > 0;
+    if (!anyAction) {
       addRow("ℹ️", "No fillable fields found on this page", "#718096");
     }
   },

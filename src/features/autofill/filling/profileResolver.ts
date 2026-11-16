@@ -106,6 +106,19 @@ export function resolveFieldValue(
       const emp = profile.employment[0];
       return emp?.current ? "Present" : (emp ? nonEmpty(emp.endDate) : undefined);
     }
+    case "currentLocation": {
+      const emp = profile.employment[0];
+      return emp ? nonEmpty(emp.location) : undefined;
+    }
+    case "currentDescription": {
+      const emp = profile.employment[0];
+      if (!emp?.description) return undefined;
+      // Return the first bullet if multi-line; otherwise the full text
+      const firstLine = emp.description.split("\n").find((l) => l.trim());
+      return firstLine ? nonEmpty(firstLine) : nonEmpty(emp.description);
+    }
+    case "skills":
+      return profile.skills.length > 0 ? profile.skills.join(", ") : undefined;
 
     // ── Application answers ───────────────────────────────────────────────────
     case "workAuthorization":

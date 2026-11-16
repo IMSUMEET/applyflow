@@ -1,5 +1,6 @@
 import type { DetectedField } from "../detection/detectedField";
 import type { FillResult } from "../filling/fieldFiller";
+import type { UserProfile } from "@/models/profile";
 
 // Every ATS adapter implements this interface.
 // Adapters encapsulate ATS-specific form structure knowledge.
@@ -11,6 +12,11 @@ export interface ATSAdapter {
 
   // Returns true if this adapter handles the given page
   matches(url: URL, doc: Document): boolean;
+
+  // Optional: called BEFORE detectFields(). Adapters that have dynamic forms
+  // (e.g. Workday "Add" buttons for work history) expand them here and fill
+  // their entries directly. Returns how many fields were filled.
+  prepare?(doc: Document, profile: UserProfile): Promise<{ filledCount: number }>;
 
   // Scans the page for all fillable fields
   detectFields(doc: Document): DetectedField[];

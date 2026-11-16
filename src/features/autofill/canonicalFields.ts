@@ -37,6 +37,10 @@ export type CanonicalField =
   | "currentTitle"
   | "currentStartDate"
   | "currentEndDate"
+  | "currentLocation"
+  | "currentDescription"
+  // Skills
+  | "skills"
   // Application answers
   | "workAuthorization"
   | "requiresSponsorship"

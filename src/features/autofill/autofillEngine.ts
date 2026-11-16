@@ -45,9 +45,17 @@ export async function runAutofillFull(
 
   const url = new URL(window.location.href);
   const adapter = selectAdapter(url, document);
-  const fields = adapter.detectFields(document);
 
-  result.fieldsDetected = fields.length;
+  // Adapters with dynamic forms (e.g. Workday) expand sections and fill entries
+  // before the standard scan runs.
+  if (adapter.prepare) {
+    const { filledCount } = await adapter.prepare(document, profile);
+    result.fieldsFilled += filledCount;
+    result.fieldsDetected += filledCount;
+  }
+
+  const fields = adapter.detectFields(document);
+  result.fieldsDetected += fields.length;
 
   for (const field of fields) {
     const label =
@@ -83,8 +91,8 @@ export async function runAutofillFull(
     const value = resolveFieldValue(field.canonicalField!, profile);
 
     if (value === undefined) {
-      result.unrecognized.push({ label: `${label} (no profile value)` });
-      unrecognizedFields.push(field);
+      // We recognised the field but have no profile data for it — skip quietly.
+      result.skipped.push({ label, reason: "no profile value" });
       continue;
     }
 

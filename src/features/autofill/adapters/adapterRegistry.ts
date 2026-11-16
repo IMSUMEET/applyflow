@@ -5,12 +5,13 @@
 import type { ATSAdapter } from "./ATSAdapter";
 import { GreenhouseAdapter } from "./greenhouseAdapter";
 import { LeverAdapter } from "./leverAdapter";
+import { WorkdayAdapter } from "./workdayAdapter";
 import { GenericAdapter } from "./genericAdapter";
 
 const ADAPTERS: ATSAdapter[] = [
   new GreenhouseAdapter(),
   new LeverAdapter(),
-  // Add Ashby, Workday, SmartRecruiters etc. here as they're built
+  new WorkdayAdapter(),
   new GenericAdapter(),
 ];
 

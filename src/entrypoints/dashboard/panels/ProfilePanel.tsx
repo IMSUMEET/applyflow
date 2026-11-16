@@ -52,6 +52,15 @@ export function ProfilePanel() {
         education: data.education.some((e) => e.institution.trim()) ? data.education : RESUME_EDUCATION,
       };
       setProfile(merged);
+      // If the merged profile has data the stored copy didn't, persist it now so
+      // autofill picks it up immediately without requiring manual field edits.
+      const hasData =
+        merged.firstName.trim() ||
+        merged.employment.some((e) => e.company.trim()) ||
+        merged.education.some((e) => e.institution.trim());
+      if (hasData) {
+        await sendMessage({ type: "SAVE_PROFILE", profile: merged });
+      }
     } finally {
       setLoading(false);
     }

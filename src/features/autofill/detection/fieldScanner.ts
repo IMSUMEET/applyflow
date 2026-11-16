@@ -148,33 +148,53 @@ function extractSignals(element: FormElement, doc: Document): FieldSignals {
 }
 
 function getLabelFor(element: FormElement, doc: Document): string {
+  let raw = "";
+
   // 1. Explicit <label for="id">
   if (element.id) {
     const label = doc.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(element.id)}"]`);
-    if (label?.textContent) return label.textContent.trim();
+    if (label?.textContent) raw = label.textContent.trim();
   }
 
   // 2. Wrapping <label>
-  const parentLabel = element.closest("label");
-  if (parentLabel?.textContent) {
-    // Strip the input's own value from the text
-    const labelText = parentLabel.textContent.trim();
-    return labelText;
+  if (!raw) {
+    const parentLabel = element.closest("label");
+    if (parentLabel?.textContent) raw = parentLabel.textContent.trim();
   }
 
   // 3. aria-labelledby
-  const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const labelEl = doc.getElementById(labelledBy);
-    if (labelEl?.textContent) return labelEl.textContent.trim();
+  if (!raw) {
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      // Multiple ids are space-separated
+      const text = labelledBy.split(" ")
+        .map((id) => doc.getElementById(id)?.textContent?.trim() ?? "")
+        .filter(Boolean)
+        .join(" ");
+      if (text) raw = text;
+    }
   }
 
   // 4. Previous sibling text node or element
-  const prev = getPreviousTextSibling(element);
-  if (prev) return prev;
+  if (!raw) raw = getPreviousTextSibling(element);
 
   // 5. Parent element's text that isn't from the input itself
-  return getParentDescriptionText(element);
+  if (!raw) raw = getParentDescriptionText(element);
+
+  return cleanLabelText(raw);
+}
+
+// Strip asterisks, "required" / "optional" markers, and trailing noise that
+// break exact-pattern matching (e.g. "Job Title *" → "Job Title").
+function cleanLabelText(text: string): string {
+  return text
+    .replace(/\s*\*+\s*/g, " ")       // asterisks used as required markers
+    .replace(/\(optional\)\s*/gi, "")
+    .replace(/\(required\)\s*/gi, "")
+    .replace(/optional\s*$/gi, "")
+    .replace(/required\s*$/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function getPreviousTextSibling(element: Element): string {
