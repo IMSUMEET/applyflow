@@ -37,36 +37,44 @@ export class WorkdayAdapter implements ATSAdapter {
   async prepare(doc: Document, profile: UserProfile): Promise<{ filledCount: number }> {
     let filledCount = 0;
 
-    // ── 1. Work History ────────────────────────────────────────────────────────
-    for (const entry of profile.employment) {
-      filledCount += await addWorkEntry(doc, entry);
-      await sleep(300);
-    }
+    try {
+      // ── 1. Work History ──────────────────────────────────────────────────────
+      for (const entry of profile.employment) {
+        try {
+          filledCount += await addWorkEntry(doc, entry);
+        } catch { /* one failed entry doesn't abort the rest */ }
+        await sleep(300);
+      }
 
-    // ── 2. Education ───────────────────────────────────────────────────────────
-    for (const entry of profile.education) {
-      filledCount += await addEducationEntry(doc, entry);
-      await sleep(300);
-    }
+      // ── 2. Education ─────────────────────────────────────────────────────────
+      for (const entry of profile.education) {
+        try {
+          filledCount += await addEducationEntry(doc, entry);
+        } catch { /* one failed entry doesn't abort the rest */ }
+        await sleep(300);
+      }
 
-    // ── 3. Skills typeahead ────────────────────────────────────────────────────
-    if (profile.skills.length > 0) {
-      filledCount += await fillSkillsTypeahead(doc, profile.skills.slice(0, 10));
-    }
+      // ── 3. Skills typeahead ──────────────────────────────────────────────────
+      if (profile.skills.length > 0) {
+        try {
+          filledCount += await fillSkillsTypeahead(doc, profile.skills.slice(0, 10));
+        } catch { /* non-fatal */ }
+      }
 
-    // ── 4. Social URLs (LinkedIn, GitHub, etc.) ────────────────────────────────
-    if (profile.linkedinUrl) {
-      filledCount += fillSocialInput(doc, profile.linkedinUrl, [
-        "linkedin", "linkedin url", "linkedin profile",
-        "provide the url to your linkedin",
-        "social network",
-      ]);
-    }
-    if (profile.githubUrl) {
-      filledCount += fillSocialInput(doc, profile.githubUrl, [
-        "github", "github url", "github profile",
-      ]);
-    }
+      // ── 4. Social URLs ───────────────────────────────────────────────────────
+      if (profile.linkedinUrl) {
+        filledCount += fillSocialInput(doc, profile.linkedinUrl, [
+          "linkedin", "linkedin url", "linkedin profile",
+          "provide the url to your linkedin",
+          "social network",
+        ]);
+      }
+      if (profile.githubUrl) {
+        filledCount += fillSocialInput(doc, profile.githubUrl, [
+          "github", "github url", "github profile",
+        ]);
+      }
+    } catch { /* outer safety net — never surface as "1 failed" */ }
 
     return { filledCount };
   }
@@ -93,7 +101,11 @@ async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<numb
     "work experience",
     "experience",
   ]);
-  if (!addBtn) return 0;
+  if (!addBtn) {
+    console.warn("[ApplyFlow] WorkdayAdapter: could not find Work History Add button");
+    return 0;
+  }
+  console.log("[ApplyFlow] WorkdayAdapter: clicking Add for", entry.company);
 
   const beforeSet = snapshotInputs(doc);
   addBtn.click();
@@ -159,7 +171,11 @@ async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<numb
 
 async function addEducationEntry(doc: Document, entry: EducationEntry): Promise<number> {
   const addBtn = findAddButtonForSection(doc, ["education"]);
-  if (!addBtn) return 0;
+  if (!addBtn) {
+    console.warn("[ApplyFlow] WorkdayAdapter: could not find Education Add button");
+    return 0;
+  }
+  console.log("[ApplyFlow] WorkdayAdapter: clicking Add for", entry.institution);
 
   const beforeSet = snapshotInputs(doc);
   addBtn.click();
@@ -260,37 +276,92 @@ function fillSocialInput(doc: Document, url: string, labelKeywords: string[]): n
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
 function findAddButtonForSection(doc: Document, keywords: string[]): HTMLButtonElement | null {
-  // Walk headings to find a section
-  const headings = doc.querySelectorAll<Element>(
-    "h1,h2,h3,h4,h5,[data-automation-id*='heading'],[data-automation-id*='title'],[role='heading']"
-  );
-  for (const h of headings) {
-    const text = (h.textContent ?? "").toLowerCase();
-    if (!keywords.some((kw) => text.includes(kw))) continue;
+  // --- Strategy A: Workday data-automation-id patterns ---
+  // Try known Workday automation IDs for Add buttons first
+  const autoIdSelectors = [
+    '[data-automation-id="add"]',
+    '[data-automation-id*="Add"]',
+    '[data-automation-id*="addButton"]',
+    '[data-uxi-element-id*="add"]',
+  ];
 
-    // Walk up to find a container, then look for an Add button within it or nearby
-    for (let el: Element | null = h; el; el = el.parentElement) {
-      const btn = findButtonByText(el, "Add");
+  // For each heading that matches, search outward for an Add button
+  const allHeadings = doc.querySelectorAll<Element>(
+    "h1,h2,h3,h4,h5,[data-automation-id*='heading'],[data-automation-id*='Title'],[role='heading']"
+  );
+
+  for (const h of allHeadings) {
+    const hText = (h.textContent ?? "").toLowerCase();
+    if (!keywords.some((kw) => hText.includes(kw))) continue;
+
+    // Walk UP through ancestors, searching within each one, stopping once
+    // the ancestor contains headings from other sections (too broad).
+    let el: Element | null = h;
+    for (let level = 0; level < 10; level++) {
+      if (!el || el.tagName === "BODY") break;
+
+      // Check data-automation-id patterns first
+      for (const sel of autoIdSelectors) {
+        const btn = el.querySelector<HTMLButtonElement>(sel);
+        if (btn && isVisible(btn)) return btn;
+      }
+
+      // Check by button text
+      const btn = findButtonByExactOrStartsWithText(el, "Add");
       if (btn) return btn;
-      // Stop climbing past a certain depth
-      if (el.tagName === "BODY") break;
+
+      const nextEl = el.parentElement;
+      if (!nextEl) break;
+
+      // Stop if the ancestor already contains headings from other sections
+      const otherHeadings = Array.from(
+        nextEl.querySelectorAll<Element>("h1,h2,h3,h4,h5")
+      ).filter((other) => other !== h);
+      if (otherHeadings.length > 0) {
+        // Check this ancestor one last time before stopping
+        const btn2 = findButtonByExactOrStartsWithText(nextEl, "Add");
+        if (btn2) return btn2;
+        break;
+      }
+
+      el = nextEl;
     }
 
-    // Check following siblings
-    let sib = h.nextElementSibling;
-    for (let i = 0; i < 10 && sib; i++) {
-      const btn = findButtonByText(sib, "Add");
-      if (btn) return btn;
-      if (sib.querySelector("h1,h2,h3,h4")) break; // hit another section
-      sib = sib.nextElementSibling;
+    // --- Strategy B: walk FORWARD through siblings at multiple DOM levels ---
+    for (
+      let ancestor: Element | null = h;
+      ancestor && ancestor.tagName !== "BODY";
+      ancestor = ancestor.parentElement
+    ) {
+      let sib = ancestor.nextElementSibling;
+      for (let i = 0; i < 8 && sib; i++) {
+        // Stop if we hit a heading for a different section
+        const sibHeadings = sib.querySelectorAll<Element>("h1,h2,h3,h4,h5");
+        if (sibHeadings.length > 0) break;
+
+        for (const sel of autoIdSelectors) {
+          const btn = sib.querySelector<HTMLButtonElement>(sel);
+          if (btn && isVisible(btn)) return btn;
+        }
+        const btn = findButtonByExactOrStartsWithText(sib, "Add");
+        if (btn) return btn;
+
+        sib = sib.nextElementSibling;
+      }
     }
   }
   return null;
 }
 
-function findButtonByText(container: Element, text: string): HTMLButtonElement | null {
+function findButtonByExactOrStartsWithText(
+  container: Element,
+  text: string
+): HTMLButtonElement | null {
   for (const btn of container.querySelectorAll<HTMLButtonElement>("button")) {
-    if (btn.textContent?.trim() === text && isVisible(btn)) return btn;
+    if (!isVisible(btn)) continue;
+    const t = btn.textContent?.trim() ?? "";
+    // Accept "Add", "+ Add", "Add Work History", etc.
+    if (t === text || t.startsWith(text) || t.startsWith(`+ ${text}`)) return btn;
   }
   return null;
 }
