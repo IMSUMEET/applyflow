@@ -48,8 +48,8 @@ export function ProfilePanel() {
             return v !== "" && v !== undefined && v !== null;
           })
         ),
-        employment: data.employment.length > 0 ? data.employment : RESUME_EMPLOYMENT,
-        education: data.education.length > 0 ? data.education : RESUME_EDUCATION,
+        employment: data.employment.some((e) => e.company.trim()) ? data.employment : RESUME_EMPLOYMENT,
+        education: data.education.some((e) => e.institution.trim()) ? data.education : RESUME_EDUCATION,
       };
       setProfile(merged);
     } finally {
