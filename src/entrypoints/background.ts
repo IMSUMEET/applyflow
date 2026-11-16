@@ -122,16 +122,34 @@ async function handleMessage(message: AppMessage): Promise<unknown> {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const tab = tabs[0];
       if (!tab?.id) return { fieldsDetected: 0, fieldsFilled: 0, learnedFieldsApplied: 0, skipped: [], failed: [], unrecognized: [] };
+      const msg = { type: "RUN_AUTOFILL" as const, profile, settings, learnedAnswers };
       try {
-        return await chrome.tabs.sendMessage(tab.id, {
-          type: "RUN_AUTOFILL",
-          profile,
-          settings,
-          learnedAnswers,
-        });
+        return await chrome.tabs.sendMessage(tab.id, msg);
       } catch {
-        return { fieldsDetected: 0, fieldsFilled: 0, learnedFieldsApplied: 0, skipped: [], failed: [{ label: "page", reason: "Content script not available on this page" }], unrecognized: [] };
+        // Content script not yet loaded (page was open before extension install/reload).
+        // Inject it programmatically then retry once.
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content-scripts/content.js"],
+          });
+          await new Promise<void>((r) => setTimeout(r, 400));
+          return await chrome.tabs.sendMessage(tab.id, msg);
+        } catch {
+          return { fieldsDetected: 0, fieldsFilled: 0, learnedFieldsApplied: 0, skipped: [], failed: [{ label: "page", reason: "Could not reach this page — please reload it and try again." }], unrecognized: [] };
+        }
       }
+    }
+
+    // Returns profile+settings+learnedAnswers so the content script sidebar can autofill
+    // without going through the popup.
+    case "FETCH_AUTOFILL_DATA": {
+      const [profile, settings, learnedAnswers] = await Promise.all([
+        profileRepository.get(),
+        settingsRepository.get(),
+        learningRepository.answers.findAll(),
+      ]);
+      return { profile, settings, learnedAnswers };
     }
 
     // ── Digest ────────────────────────────────────────────────────────────────

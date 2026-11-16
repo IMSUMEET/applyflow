@@ -8,7 +8,7 @@ export default defineConfig({
     description:
       "Intelligent job application autofill, self-learning answers, and referral management.",
     version: "0.1.0",
-    permissions: ["storage", "activeTab", "alarms", "notifications", "tabs"],
+    permissions: ["storage", "activeTab", "alarms", "notifications", "tabs", "scripting"],
     host_permissions: ["<all_urls>"],
     icons: {
       16: "icons/16.png",

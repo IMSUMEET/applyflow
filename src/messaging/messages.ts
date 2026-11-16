@@ -44,6 +44,8 @@ export type AppMessage =
   | { type: "DELETE_LEARNED_ANSWER"; answerId: string }
   // Autofill — popup triggers this; background loads profile and relays to content script
   | { type: "EXECUTE_AUTOFILL" }
+  // Fetch profile+settings+learnedAnswers for use inside the content script sidebar
+  | { type: "FETCH_AUTOFILL_DATA" }
   // Digest
   | { type: "GENERATE_DIGEST" }
   // Ping (for testing connectivity)
@@ -72,6 +74,7 @@ export type AppMessageResponseMap = {
   UPDATE_LEARNED_ANSWER: { success: true };
   DELETE_LEARNED_ANSWER: { success: true };
   EXECUTE_AUTOFILL: AutofillResult;
+  FETCH_AUTOFILL_DATA: { profile: UserProfile; settings: UserSettings; learnedAnswers: LearnedAnswer[] };
   GENERATE_DIGEST: DigestData;
   PING: { alive: true };
 };
