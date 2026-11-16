@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Software Engineer at Stripe | Greenhouse</title>
+  <meta property="og:site_name" content="Stripe">
+</head>
+<body>
+<!-- Greenhouse uses predictable id patterns -->
+<form id="s3_upload_for_job_application">
+  <div class="field">
+    <label for="first_name">First name</label>
+    <input id="first_name" name="job_application[first_name]" type="text" />
+  </div>
+  <div class="field">
+    <label for="last_name">Last name</label>
+    <input id="last_name" name="job_application[last_name]" type="text" />
+  </div>
+  <div class="field">
+    <label for="email">Email address</label>
+    <input id="email" name="job_application[email]" type="email" />
+  </div>
+  <div class="field">
+    <label for="phone">Phone</label>
+    <input id="phone" name="job_application[phone]" type="tel" />
+  </div>
+  <div class="field">
+    <label for="job_application_location">Location (City)</label>
+    <input id="job_application_location" name="job_application[location]" type="text" />
+  </div>
+  <!-- LinkedIn / GitHub custom questions -->
+  <div class="field">
+    <label for="question_linkedin">LinkedIn Profile</label>
+    <input id="question_linkedin" name="q_linkedin_profile" type="url" />
+  </div>
+  <div class="field">
+    <label for="question_github">GitHub Profile</label>
+    <input id="question_github" name="q_github_profile" type="url" />
+  </div>
+  <!-- Work auth select -->
+  <div class="field">
+    <label for="question_work_auth">Are you legally authorized to work in the US?</label>
+    <select id="question_work_auth" name="q_work_authorization">
+      <option value="">Select an option</option>
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+  </div>
+  <!-- Sponsorship radio -->
+  <fieldset>
+    <legend>Will you now or in the future require sponsorship for employment visa status?</legend>
+    <label><input type="radio" name="q_sponsorship" value="yes" /> Yes</label>
+    <label><input type="radio" name="q_sponsorship" value="no" /> No</label>
+  </fieldset>
+</form>
+</body>
+</html>

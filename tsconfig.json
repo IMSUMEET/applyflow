@@ -1,0 +1,15 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["chrome"],
+    "paths": {
+      "@": ["./src"],
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "wxt.config.ts", ".wxt/wxt.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}
