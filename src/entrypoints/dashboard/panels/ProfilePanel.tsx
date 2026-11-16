@@ -6,6 +6,7 @@ import { emptyProfile } from "@/models/profile";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { generateId } from "@/utils/id";
+import { RESUME_BASE, RESUME_EMPLOYMENT, RESUME_EDUCATION } from "@/data/resumeDefaults";
 import {
   COUNTRIES,
   DEGREE_OPTIONS,
@@ -35,7 +36,22 @@ export function ProfilePanel() {
   async function load() {
     try {
       const data = await sendMessage({ type: "GET_PROFILE" });
-      setProfile(data);
+      // Seed from resume for any fields that are still empty
+      const merged: UserProfile = {
+        ...emptyProfile(),
+        ...Object.fromEntries(
+          Object.entries(RESUME_BASE).filter(([, v]) => v !== "" && v !== undefined)
+        ),
+        ...Object.fromEntries(
+          Object.entries(data).filter(([, v]) => {
+            if (Array.isArray(v)) return v.length > 0;
+            return v !== "" && v !== undefined && v !== null;
+          })
+        ),
+        employment: data.employment.length > 0 ? data.employment : RESUME_EMPLOYMENT,
+        education: data.education.length > 0 ? data.education : RESUME_EDUCATION,
+      };
+      setProfile(merged);
     } finally {
       setLoading(false);
     }
@@ -447,17 +463,14 @@ function EmploymentCard({
         </button>
       </div>
 
-      {/* Description */}
+      {/* Description — bullet editor */}
       <div>
-        <label className="text-xs font-medium text-gray-600 mb-1 block">
+        <label className="text-xs font-medium text-gray-600 mb-2 block">
           Description <span className="text-gray-400 font-normal">(optional)</span>
         </label>
-        <textarea
+        <BulletEditor
           value={entry.description ?? ""}
-          onChange={(e) => up("description", e.target.value || undefined)}
-          rows={2}
-          placeholder="Key achievements, technologies, responsibilities…"
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          onChange={(v) => up("description", v || undefined)}
         />
       </div>
     </div>
@@ -571,6 +584,88 @@ function EducationCard({
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Bullet editor ──────────────────────────────────────────────────────────────
+
+function BulletEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  // Store as "\n"-separated lines; filter blank lines for display but preserve order
+  const bullets = value ? value.split("\n") : [""];
+  const displayBullets = bullets.length > 0 ? bullets : [""];
+
+  function updateBullet(index: number, text: string) {
+    const updated = [...displayBullets];
+    updated[index] = text;
+    onChange(updated.join("\n"));
+  }
+
+  function removeBullet(index: number) {
+    const updated = displayBullets.filter((_, i) => i !== index);
+    onChange(updated.length > 0 ? updated.join("\n") : "");
+  }
+
+  function addBullet() {
+    onChange([...displayBullets, ""].join("\n"));
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>, index: number) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // Insert new bullet after current
+      const updated = [...displayBullets];
+      updated.splice(index + 1, 0, "");
+      onChange(updated.join("\n"));
+      // Focus next bullet after render
+      setTimeout(() => {
+        const inputs = document.querySelectorAll<HTMLInputElement>(`[data-bullet-index="${index + 1}"]`);
+        inputs[0]?.focus();
+      }, 0);
+    }
+    if (e.key === "Backspace" && displayBullets[index] === "" && displayBullets.length > 1) {
+      e.preventDefault();
+      removeBullet(index);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {displayBullets.map((bullet, i) => (
+        <div key={i} className="flex items-start gap-2 group">
+          <span className="text-brand-400 font-bold text-sm mt-2 w-3 shrink-0 select-none">•</span>
+          <input
+            type="text"
+            value={bullet}
+            data-bullet-index={i}
+            onChange={(e) => updateBullet(i, e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, i)}
+            placeholder="Describe what you built, the impact, the tech…"
+            className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          {displayBullets.length > 1 && (
+            <button
+              onClick={() => removeBullet(i)}
+              className="text-gray-200 hover:text-red-400 transition-colors mt-1.5 opacity-0 group-hover:opacity-100 shrink-0"
+              aria-label="Remove bullet"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        onClick={addBullet}
+        className="flex items-center gap-1 text-xs text-brand-500 hover:text-brand-700 font-medium mt-1 pl-5"
+      >
+        <Plus className="h-3 w-3" /> Add bullet
+      </button>
     </div>
   );
 }
