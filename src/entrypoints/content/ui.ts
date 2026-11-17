@@ -88,7 +88,11 @@ export const AppSidebar = {
       addRow("❓", `${result.unrecognized.length} unrecognized — fill manually`, "#c05621");
     }
     if (result.failed.length > 0) {
-      addRow("❌", `${result.failed.length} failed`, "#c53030");
+      if (result.failed.length === 1 && result.failed[0]?.reason) {
+        addRow("❌", result.failed[0].reason, "#c53030");
+      } else {
+        addRow("❌", `${result.failed.length} failed`, "#c53030");
+      }
     }
     const anyAction =
       result.fieldsFilled > 0 ||

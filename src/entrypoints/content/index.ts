@@ -104,13 +104,17 @@ async function runAutofillFromSidebar(): Promise<void> {
       });
     }
   } catch (err) {
+    const msg = String(err);
     console.error("[ApplyFlow] Sidebar autofill error:", err);
+    const reason = msg.includes("context invalidated") || msg.includes("Extension context")
+      ? "Extension was reloaded — please reload this page (Cmd+R)"
+      : msg;
     AppSidebar.showResult({
       fieldsDetected: 0,
       fieldsFilled: 0,
       learnedFieldsApplied: 0,
       skipped: [],
-      failed: [{ label: "error", reason: String(err) }],
+      failed: [{ label: "error", reason }],
       unrecognized: [],
     });
   } finally {
