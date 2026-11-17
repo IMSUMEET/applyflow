@@ -22,7 +22,6 @@ export class WorkdayAdapter implements ATSAdapter {
     ) {
       return true;
     }
-    // DOM-based: Workday injects data-automation-id on most interactive elements
     return (
       !!doc.querySelector("[data-automation-id]") &&
       !!(
@@ -36,22 +35,38 @@ export class WorkdayAdapter implements ATSAdapter {
 
   async prepare(doc: Document, profile: UserProfile): Promise<{ filledCount: number }> {
     let filledCount = 0;
-
     try {
       // ── 1. Work History ──────────────────────────────────────────────────────
       for (const entry of profile.employment) {
         try {
-          filledCount += await addWorkEntry(doc, entry);
-        } catch { /* one failed entry doesn't abort the rest */ }
-        await sleep(300);
+          // Always pick the FIRST "Add" button in the Work History section
+          const btn = findAddButtonNear(doc, ["work history", "employment history", "work experience", "experience"]);
+          if (!btn) {
+            console.warn("[ApplyFlow] Workday: no Work History Add button found");
+            break;
+          }
+          console.log("[ApplyFlow] Workday: adding work entry for", entry.company);
+          filledCount += await addWorkEntry(doc, btn, entry);
+        } catch (e) {
+          console.error("[ApplyFlow] Workday: work entry error", e);
+        }
+        await sleep(400);
       }
 
       // ── 2. Education ─────────────────────────────────────────────────────────
       for (const entry of profile.education) {
         try {
-          filledCount += await addEducationEntry(doc, entry);
-        } catch { /* one failed entry doesn't abort the rest */ }
-        await sleep(300);
+          const btn = findAddButtonNear(doc, ["education"]);
+          if (!btn) {
+            console.warn("[ApplyFlow] Workday: no Education Add button found");
+            break;
+          }
+          console.log("[ApplyFlow] Workday: adding education entry for", entry.institution);
+          filledCount += await addEducationEntry(doc, btn, entry);
+        } catch (e) {
+          console.error("[ApplyFlow] Workday: education entry error", e);
+        }
+        await sleep(400);
       }
 
       // ── 3. Skills typeahead ──────────────────────────────────────────────────
@@ -62,20 +77,21 @@ export class WorkdayAdapter implements ATSAdapter {
       }
 
       // ── 4. Social URLs ───────────────────────────────────────────────────────
-      if (profile.linkedinUrl) {
-        filledCount += fillSocialInput(doc, profile.linkedinUrl, [
-          "linkedin", "linkedin url", "linkedin profile",
-          "provide the url to your linkedin",
-          "social network",
-        ]);
-      }
+      filledCount += fillSocialInput(doc, profile.linkedinUrl, [
+        "linkedin", "linkedin url", "linkedin profile",
+        "provide the url to your linkedin",
+        "your linkedin profile",
+        "linkedin.com",
+        "social network",
+      ]);
       if (profile.githubUrl) {
         filledCount += fillSocialInput(doc, profile.githubUrl, [
           "github", "github url", "github profile",
         ]);
       }
-    } catch { /* outer safety net — never surface as "1 failed" */ }
-
+    } catch (e) {
+      console.error("[ApplyFlow] Workday prepare error", e);
+    }
     return { filledCount };
   }
 
@@ -92,27 +108,87 @@ export class WorkdayAdapter implements ATSAdapter {
   }
 }
 
-// ── Work History ──────────────────────────────────────────────────────────────
-
-async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<number> {
-  const addBtn = findAddButtonForSection(doc, [
-    "work history",
-    "employment history",
-    "work experience",
-    "experience",
-  ]);
-  if (!addBtn) {
-    console.warn("[ApplyFlow] WorkdayAdapter: could not find Work History Add button");
-    return 0;
+// ── Core: find the Add button near a section heading ─────────────────────────
+//
+// Strategy: collect every visible button whose text is "Add", then for each
+// one walk UP its ancestor chain looking for an element whose text content
+// includes one of the keywords. The shallowest (closest) match wins.
+// Last resort: return the FIRST "Add" button on the page.
+//
+function findAddButtonNear(
+  doc: Document,
+  keywords: string[]
+): HTMLButtonElement | null {
+  const candidates = collectAddButtons(doc);
+  if (candidates.length === 0) {
+    console.warn("[ApplyFlow] Workday: zero buttons with text 'Add' on page");
+    return null;
   }
-  console.log("[ApplyFlow] WorkdayAdapter: clicking Add for", entry.company);
 
+  for (const btn of candidates) {
+    // Walk UP ancestors; find the shallowest one that contains a keyword
+    for (
+      let el: Element | null = btn.parentElement;
+      el && el.tagName !== "BODY";
+      el = el.parentElement
+    ) {
+      const text = (el.textContent ?? "").toLowerCase();
+      if (keywords.some((kw) => text.includes(kw))) {
+        // Don't match if the element is too large (whole-page container)
+        const childCount = el.children.length + el.querySelectorAll("*").length;
+        if (childCount < 300) {
+          return btn;
+        }
+      }
+    }
+  }
+
+  // Fallback: return the first Add button (Work History) or the
+  // one closest by DOM position to a matching heading.
+  console.warn("[ApplyFlow] Workday: falling back to first Add button for keywords", keywords);
+  return candidates[0] ?? null;
+}
+
+function collectAddButtons(doc: Document): HTMLButtonElement[] {
+  const result: HTMLButtonElement[] = [];
+  for (const el of doc.querySelectorAll<HTMLButtonElement>("button")) {
+    // Strip any SVG/icon text — just get the text node content
+    const text = Array.from(el.childNodes)
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent?.trim() ?? "")
+      .join("")
+      .trim();
+
+    const full = el.textContent?.trim() ?? "";
+
+    // Accept "Add", "+ Add", " Add ", any capitalisation
+    if (
+      text.toLowerCase() === "add" ||
+      full.toLowerCase() === "add" ||
+      full.toLowerCase() === "+ add"
+    ) {
+      result.push(el);
+    }
+  }
+  return result;
+}
+
+// ── Work History entry ────────────────────────────────────────────────────────
+
+async function addWorkEntry(
+  doc: Document,
+  addBtn: HTMLButtonElement,
+  entry: EmploymentEntry
+): Promise<number> {
   const beforeSet = snapshotInputs(doc);
   addBtn.click();
-  await sleep(700);
+  await sleep(800);
 
   const newInputs = newInputsSince(doc, beforeSet);
-  if (newInputs.length === 0) return 0;
+  if (newInputs.length === 0) {
+    console.warn("[ApplyFlow] Workday: no new inputs appeared after Work History Add click");
+    return 0;
+  }
 
   const container = commonAncestor(newInputs) ?? doc.body;
   let filled = 0;
@@ -128,21 +204,22 @@ async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<numb
       "location", "city", "city state", "work location",
     ]);
   }
+
   if (entry.startDate) {
     filled += fillByLabel(container, doc, toWorkdayDate(entry.startDate), [
       "from", "start date", "start month", "start",
     ]);
   }
 
-  // "Currently working here" checkbox
   const cb = findCheckbox(container, doc, [
-    "i currently work here", "currently work here", "current employer",
-    "i am currently working in this role", "currently employed here",
+    "i currently work here", "currently work here",
+    "i am currently working in this role",
+    "currently employed here", "current",
   ]);
   if (cb) {
     setCheckboxValue(cb, entry.current ?? false);
     filled++;
-    await sleep(300); // Allow To field to show/hide
+    await sleep(300);
   }
 
   if (!entry.current && entry.endDate) {
@@ -152,7 +229,6 @@ async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<numb
   }
 
   if (entry.description) {
-    // Workday description fields are typically textareas
     const desc = entry.description
       .split("\n")
       .filter((l) => l.trim())
@@ -167,40 +243,34 @@ async function addWorkEntry(doc: Document, entry: EmploymentEntry): Promise<numb
   return filled;
 }
 
-// ── Education ─────────────────────────────────────────────────────────────────
+// ── Education entry ───────────────────────────────────────────────────────────
 
-async function addEducationEntry(doc: Document, entry: EducationEntry): Promise<number> {
-  const addBtn = findAddButtonForSection(doc, ["education"]);
-  if (!addBtn) {
-    console.warn("[ApplyFlow] WorkdayAdapter: could not find Education Add button");
-    return 0;
-  }
-  console.log("[ApplyFlow] WorkdayAdapter: clicking Add for", entry.institution);
-
+async function addEducationEntry(
+  doc: Document,
+  addBtn: HTMLButtonElement,
+  entry: EducationEntry
+): Promise<number> {
   const beforeSet = snapshotInputs(doc);
   addBtn.click();
-  await sleep(700);
+  await sleep(800);
 
   const newInputs = newInputsSince(doc, beforeSet);
-  if (newInputs.length === 0) return 0;
+  if (newInputs.length === 0) {
+    console.warn("[ApplyFlow] Workday: no new inputs appeared after Education Add click");
+    return 0;
+  }
 
   const container = commonAncestor(newInputs) ?? doc.body;
   let filled = 0;
 
   filled += fillByLabel(container, doc, entry.institution, [
     "school", "university", "college", "institution", "school name",
-    "school university college",
   ]);
-
-  // Degree may be a select
   filled += fillSelectByLabel(container, doc, entry.degree, [
     "degree", "degree type", "highest degree", "level of education",
-    "highest level of education",
   ]);
-
   filled += fillByLabel(container, doc, entry.fieldOfStudy, [
     "field of study", "major", "concentration", "discipline", "area of study",
-    "field major",
   ]);
   if (entry.gpa) {
     filled += fillByLabel(container, doc, entry.gpa, ["gpa", "grade point average"]);
@@ -212,8 +282,8 @@ async function addEducationEntry(doc: Document, entry: EducationEntry): Promise<
   }
 
   const cb = findCheckbox(container, doc, [
-    "currently enrolled", "currently attending", "i currently attend",
-    "currently a student",
+    "currently enrolled", "currently attending",
+    "i currently attend", "currently a student",
   ]);
   if (cb) {
     setCheckboxValue(cb, entry.current ?? false);
@@ -241,11 +311,8 @@ async function fillSkillsTypeahead(doc: Document, skills: string[]): Promise<num
 
   let filled = 0;
   for (const skill of skills) {
-    // Set value
     setInputValue(input, skill);
     await sleep(150);
-
-    // Confirm with Enter — common Workday pattern
     const kd = new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true });
     const kp = new KeyboardEvent("keypress", { key: "Enter", keyCode: 13, bubbles: true });
     const ku = new KeyboardEvent("keyup", { key: "Enter", keyCode: 13, bubbles: true });
@@ -253,11 +320,7 @@ async function fillSkillsTypeahead(doc: Document, skills: string[]): Promise<num
     input.dispatchEvent(kp);
     input.dispatchEvent(ku);
     await sleep(200);
-
-    // If input was cleared, skill was accepted
     filled++;
-
-    // Clear for next skill
     setInputValue(input, "");
     await sleep(100);
   }
@@ -267,6 +330,7 @@ async function fillSkillsTypeahead(doc: Document, skills: string[]): Promise<num
 // ── Social URLs ───────────────────────────────────────────────────────────────
 
 function fillSocialInput(doc: Document, url: string, labelKeywords: string[]): number {
+  if (!url) return 0;
   const input = findAnyTextInput(doc, labelKeywords);
   if (!input) return 0;
   setInputValue(input, url);
@@ -274,97 +338,6 @@ function fillSocialInput(doc: Document, url: string, labelKeywords: string[]): n
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
-
-function findAddButtonForSection(doc: Document, keywords: string[]): HTMLButtonElement | null {
-  // --- Strategy A: Workday data-automation-id patterns ---
-  // Try known Workday automation IDs for Add buttons first
-  const autoIdSelectors = [
-    '[data-automation-id="add"]',
-    '[data-automation-id*="Add"]',
-    '[data-automation-id*="addButton"]',
-    '[data-uxi-element-id*="add"]',
-  ];
-
-  // For each heading that matches, search outward for an Add button
-  const allHeadings = doc.querySelectorAll<Element>(
-    "h1,h2,h3,h4,h5,[data-automation-id*='heading'],[data-automation-id*='Title'],[role='heading']"
-  );
-
-  for (const h of allHeadings) {
-    const hText = (h.textContent ?? "").toLowerCase();
-    if (!keywords.some((kw) => hText.includes(kw))) continue;
-
-    // Walk UP through ancestors, searching within each one, stopping once
-    // the ancestor contains headings from other sections (too broad).
-    let el: Element | null = h;
-    for (let level = 0; level < 10; level++) {
-      if (!el || el.tagName === "BODY") break;
-
-      // Check data-automation-id patterns first
-      for (const sel of autoIdSelectors) {
-        const btn = el.querySelector<HTMLButtonElement>(sel);
-        if (btn && isVisible(btn)) return btn;
-      }
-
-      // Check by button text
-      const btn = findButtonByExactOrStartsWithText(el, "Add");
-      if (btn) return btn;
-
-      const nextEl = el.parentElement;
-      if (!nextEl) break;
-
-      // Stop if the ancestor already contains headings from other sections
-      const otherHeadings = Array.from(
-        nextEl.querySelectorAll<Element>("h1,h2,h3,h4,h5")
-      ).filter((other) => other !== h);
-      if (otherHeadings.length > 0) {
-        // Check this ancestor one last time before stopping
-        const btn2 = findButtonByExactOrStartsWithText(nextEl, "Add");
-        if (btn2) return btn2;
-        break;
-      }
-
-      el = nextEl;
-    }
-
-    // --- Strategy B: walk FORWARD through siblings at multiple DOM levels ---
-    for (
-      let ancestor: Element | null = h;
-      ancestor && ancestor.tagName !== "BODY";
-      ancestor = ancestor.parentElement
-    ) {
-      let sib = ancestor.nextElementSibling;
-      for (let i = 0; i < 8 && sib; i++) {
-        // Stop if we hit a heading for a different section
-        const sibHeadings = sib.querySelectorAll<Element>("h1,h2,h3,h4,h5");
-        if (sibHeadings.length > 0) break;
-
-        for (const sel of autoIdSelectors) {
-          const btn = sib.querySelector<HTMLButtonElement>(sel);
-          if (btn && isVisible(btn)) return btn;
-        }
-        const btn = findButtonByExactOrStartsWithText(sib, "Add");
-        if (btn) return btn;
-
-        sib = sib.nextElementSibling;
-      }
-    }
-  }
-  return null;
-}
-
-function findButtonByExactOrStartsWithText(
-  container: Element,
-  text: string
-): HTMLButtonElement | null {
-  for (const btn of container.querySelectorAll<HTMLButtonElement>("button")) {
-    if (!isVisible(btn)) continue;
-    const t = btn.textContent?.trim() ?? "";
-    // Accept "Add", "+ Add", "Add Work History", etc.
-    if (t === text || t.startsWith(text) || t.startsWith(`+ ${text}`)) return btn;
-  }
-  return null;
-}
 
 function snapshotInputs(doc: Document): Set<Element> {
   return new Set(
@@ -379,7 +352,7 @@ function newInputsSince(doc: Document, before: Set<Element>): Element[] {
     doc.querySelectorAll<Element>(
       'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea'
     )
-  ).filter((el) => !before.has(el) && isVisible(el));
+  ).filter((el) => !before.has(el));
 }
 
 function commonAncestor(elements: Element[]): Element | null {
@@ -392,7 +365,6 @@ function commonAncestor(elements: Element[]): Element | null {
 }
 
 function getLabelText(input: Element, doc: Document): string {
-  // 1. aria-labelledby (may be space-separated ids)
   const lby = input.getAttribute("aria-labelledby");
   if (lby) {
     const text = lby
@@ -400,50 +372,40 @@ function getLabelText(input: Element, doc: Document): string {
       .map((id) => doc.getElementById(id)?.textContent?.trim() ?? "")
       .filter(Boolean)
       .join(" ");
-    if (text) return norm(text);
+    if (text) return normLabel(text);
   }
-
-  // 2. label[for]
   const id = input.id;
   if (id) {
     const lbl = doc.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
-    if (lbl?.textContent) return norm(lbl.textContent);
+    if (lbl?.textContent) return normLabel(lbl.textContent);
   }
-
-  // 3. wrapping label
   const parentLabel = input.closest("label");
-  if (parentLabel?.textContent) return norm(parentLabel.textContent);
+  if (parentLabel?.textContent) return normLabel(parentLabel.textContent);
 
-  // 4. previous element sibling
   let prev = input.previousElementSibling;
   while (prev) {
     const tag = prev.tagName;
     if (!["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(tag)) {
-      const t = norm(prev.textContent ?? "");
+      const t = normLabel(prev.textContent ?? "");
       if (t) return t;
     }
     prev = prev.previousElementSibling;
   }
-
-  // 5. parent container text (excluding other inputs)
   const parent = input.parentElement;
   if (parent) {
     const clone = parent.cloneNode(true) as Element;
     clone.querySelectorAll("input,textarea,select,button").forEach((e) => e.remove());
-    const t = norm(clone.textContent ?? "");
+    const t = normLabel(clone.textContent ?? "");
     if (t && t.length < 120) return t;
   }
-
   return "";
 }
 
-function norm(text: string): string {
+function normLabel(text: string): string {
   return text
     .replace(/\s*\*+\s*/g, " ")
     .replace(/\(optional\)/gi, "")
     .replace(/\(required\)/gi, "")
-    .replace(/optional\s*$/gi, "")
-    .replace(/required\s*$/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim()
     .toLowerCase();
@@ -452,17 +414,13 @@ function norm(text: string): string {
 function findInputInContainer(
   container: Element,
   doc: Document,
-  labels: string[],
-  excludeCheckbox = true
+  labels: string[]
 ): HTMLInputElement | HTMLTextAreaElement | null {
-  const selector = excludeCheckbox
-    ? 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea'
-    : 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea';
-
+  const selector =
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea';
   for (const lbl of labels) {
     const target = lbl.toLowerCase();
     for (const el of container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(selector)) {
-      if (!isVisible(el)) continue;
       const elLabel = getLabelText(el, doc);
       if (elLabel === target || elLabel.includes(target) || target.includes(elLabel)) {
         return el;
@@ -490,11 +448,9 @@ function fillTextarea(
   value: string,
   labels: string[]
 ): number {
-  // First try to find a textarea matching label
   for (const lbl of labels) {
     const target = lbl.toLowerCase();
     for (const ta of container.querySelectorAll<HTMLTextAreaElement>("textarea")) {
-      if (!isVisible(ta)) continue;
       const taLabel = getLabelText(ta, doc);
       if (taLabel === target || taLabel.includes(target) || target.includes(taLabel)) {
         setInputValue(ta, value);
@@ -502,10 +458,7 @@ function fillTextarea(
       }
     }
   }
-  // Fallback: fill any visible textarea in the container
-  const anyTa = Array.from(container.querySelectorAll<HTMLTextAreaElement>("textarea")).find(
-    (ta) => isVisible(ta)
-  );
+  const anyTa = container.querySelector<HTMLTextAreaElement>("textarea");
   if (anyTa) {
     setInputValue(anyTa, value);
     return 1;
@@ -522,11 +475,9 @@ function fillSelectByLabel(
   for (const lbl of labels) {
     const target = lbl.toLowerCase();
     for (const sel of container.querySelectorAll<HTMLSelectElement>("select")) {
-      if (!isVisible(sel)) continue;
       const selLabel = getLabelText(sel, doc);
       if (selLabel === target || selLabel.includes(target) || target.includes(selLabel)) {
-        const ok = setSelectValue(sel, value);
-        return ok ? 1 : 0;
+        return setSelectValue(sel, value) ? 1 : 0;
       }
     }
   }
@@ -541,7 +492,6 @@ function findCheckbox(
   for (const lbl of labels) {
     const target = lbl.toLowerCase();
     for (const cb of container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
-      if (!isVisible(cb)) continue;
       const cbLabel = getLabelText(cb, doc);
       if (cbLabel.includes(target) || target.includes(cbLabel)) return cb;
     }
@@ -555,7 +505,6 @@ function findAnyTextInput(doc: Document, labelKeywords: string[]): HTMLInputElem
     for (const input of doc.querySelectorAll<HTMLInputElement>(
       'input[type="text"], input:not([type])'
     )) {
-      if (!isVisible(input)) continue;
       const lbl = getLabelText(input, doc);
       const ph = (input.placeholder ?? "").toLowerCase();
       if (lbl.includes(target) || ph.includes(target) || target.includes(lbl)) {
@@ -571,21 +520,6 @@ function toWorkdayDate(yyyymm: string): string {
   const [year, month] = yyyymm.split("-");
   if (year && month) return `${month}/${year}`;
   return yyyymm;
-}
-
-function isVisible(el: Element): boolean {
-  const view = el.ownerDocument?.defaultView;
-  if (!view) return true;
-  try {
-    const style = view.getComputedStyle(el as HTMLElement);
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      style.opacity !== "0"
-    );
-  } catch {
-    return true;
-  }
 }
 
 function sleep(ms: number): Promise<void> {

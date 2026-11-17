@@ -456,11 +456,7 @@ function createSidebar(jobInfo: DetectedJobInfo): void {
   sidebarEl.appendChild(scroll);
 
   document.body.appendChild(sidebarEl);
-
-  // Auto-expand on application pages
-  if (jobInfo.title || jobInfo.company) {
-    setTimeout(expand, 600);
-  }
+  // Sidebar starts collapsed — user opens it by clicking the tab
 }
 
 function expand(): void {
